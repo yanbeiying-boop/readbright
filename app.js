@@ -76,7 +76,9 @@ const state = {
   currentFinal: "",
   currentInterim: "",
   isListening: false,
+  assessmentMode: localStorage.getItem("readbright-mode") || "free",
   readingRecognition: null,
+  azureRecognizer: null,
   nameRecognition: null,
   finalizeTimer: null,
   rainbowSentenceIndex: -1,
@@ -94,6 +96,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (savedName) {
     els.nameInput.value = `My name is ${savedName}`;
   }
+
+  const savedRegion = localStorage.getItem("readbright-azure-region");
+  if (savedRegion) els.azureRegionInput.value = savedRegion;
+  setAssessmentMode(state.assessmentMode);
 });
 
 function bindElements() {
@@ -112,6 +118,13 @@ function bindElements() {
     "loadTextButton",
     "sampleButton",
     "fileStatus",
+    "modeFreeButton",
+    "modeApiButton",
+    "apiPanel",
+    "azureKeyInput",
+    "azureRegionInput",
+    "clearApiButton",
+    "apiStatus",
     "sentenceCounter",
     "startReadingButton",
     "stopReadingButton",
@@ -145,6 +158,12 @@ function bindEvents() {
     loadText();
   });
   els.fileInput.addEventListener("change", handleFileUpload);
+  els.modeFreeButton.addEventListener("click", () => setAssessmentMode("free"));
+  els.modeApiButton.addEventListener("click", () => setAssessmentMode("api"));
+  els.azureRegionInput.addEventListener("input", () => {
+    localStorage.setItem("readbright-azure-region", els.azureRegionInput.value.trim());
+  });
+  els.clearApiButton.addEventListener("click", clearApiCredentials);
   els.startReadingButton.addEventListener("click", startReading);
   els.stopReadingButton.addEventListener("click", stopReading);
   els.nextSentenceButton.addEventListener("click", () => finalizeCurrentSentence(true));
@@ -157,6 +176,23 @@ function hydrateIcons() {
   if (window.lucide) {
     window.lucide.createIcons();
   }
+}
+
+
+function setAssessmentMode(mode) {
+  state.assessmentMode = mode === "api" ? "api" : "free";
+  localStorage.setItem("readbright-mode", state.assessmentMode);
+  els.modeFreeButton.classList.toggle("is-active", state.assessmentMode === "free");
+  els.modeApiButton.classList.toggle("is-active", state.assessmentMode === "api");
+  els.apiPanel.classList.toggle("is-hidden", state.assessmentMode !== "api");
+  els.apiStatus.textContent = state.assessmentMode === "api" ? "Key stays in this browser" : "Not saved";
+}
+
+function clearApiCredentials() {
+  els.azureKeyInput.value = "";
+  els.azureRegionInput.value = "";
+  localStorage.removeItem("readbright-azure-region");
+  els.apiStatus.textContent = "Cleared";
 }
 
 function getRecognitionConstructor() {
@@ -374,6 +410,11 @@ function cleanImportedText(text) {
 function startReading() {
   if (!state.sentences.length) loadText();
 
+  if (state.assessmentMode === "api") {
+    startApiAssessment();
+    return;
+  }
+
   const Recognition = getRecognitionConstructor();
   if (!Recognition) {
     els.liveTranscript.textContent = "Speech recognition is not available in this browser.";
@@ -381,6 +422,7 @@ function startReading() {
   }
 
   stopRecognition(state.readingRecognition);
+  stopAzureRecognizer();
   state.currentFinal = "";
   state.currentInterim = "";
   state.isListening = true;
@@ -398,7 +440,7 @@ function startReading() {
     els.liveTranscript.textContent = "Recognition paused.";
   };
   state.readingRecognition.onend = () => {
-    if (state.isListening) {
+    if (state.isListening && state.assessmentMode === "free") {
       try {
         state.readingRecognition.start();
       } catch {
@@ -419,7 +461,138 @@ function stopReading() {
   state.isListening = false;
   clearTimeout(state.finalizeTimer);
   stopRecognition(state.readingRecognition);
+  stopAzureRecognizer();
   updateListeningButtons();
+}
+
+
+function startApiAssessment() {
+  if (!window.SpeechSDK) {
+    els.liveTranscript.textContent = "Azure Speech SDK is still loading.";
+    return;
+  }
+
+  const key = els.azureKeyInput.value.trim();
+  const region = els.azureRegionInput.value.trim();
+  if (!key || !region) {
+    els.apiStatus.textContent = "Add key and region";
+    els.liveTranscript.textContent = "API key required.";
+    return;
+  }
+
+  stopRecognition(state.readingRecognition);
+  stopAzureRecognizer();
+  state.currentFinal = "";
+  state.currentInterim = "";
+  state.isListening = true;
+  els.startReadingButton.disabled = true;
+  els.stopReadingButton.disabled = false;
+  els.liveTranscript.textContent = "API listening";
+  els.apiStatus.textContent = "Listening";
+
+  const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(key, region);
+  speechConfig.speechRecognitionLanguage = "en-US";
+  const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+  const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+  state.azureRecognizer = recognizer;
+
+  const referenceText = state.sentences[state.currentIndex] || "";
+  const assessmentConfig = new SpeechSDK.PronunciationAssessmentConfig(
+    referenceText,
+    SpeechSDK.PronunciationAssessmentGradingSystem.HundredMark,
+    SpeechSDK.PronunciationAssessmentGranularity.Phoneme,
+    true
+  );
+  assessmentConfig.phonemeAlphabet = "IPA";
+  assessmentConfig.nbestPhonemeCount = 1;
+  assessmentConfig.applyTo(recognizer);
+
+  recognizer.recognizeOnceAsync(
+    (result) => {
+      state.isListening = false;
+      updateListeningButtons();
+      applyApiAssessmentResult(result);
+      recognizer.close();
+      if (state.azureRecognizer === recognizer) state.azureRecognizer = null;
+    },
+    (error) => {
+      state.isListening = false;
+      updateListeningButtons();
+      els.apiStatus.textContent = "API error";
+      els.liveTranscript.textContent = String(error || "API error");
+      recognizer.close();
+      if (state.azureRecognizer === recognizer) state.azureRecognizer = null;
+    }
+  );
+}
+
+function stopAzureRecognizer() {
+  if (!state.azureRecognizer) return;
+  try {
+    state.azureRecognizer.close();
+  } catch {
+    /* Azure recognizer was already closed. */
+  }
+  state.azureRecognizer = null;
+}
+
+function applyApiAssessmentResult(result) {
+  const jsonText = result.properties?.getProperty?.(SpeechSDK.PropertyId.SpeechServiceResponse_JsonResult) || "";
+  let payload = null;
+  try {
+    payload = JSON.parse(jsonText);
+  } catch {
+    payload = null;
+  }
+
+  const best = payload?.NBest?.[0];
+  const apiWords = Array.isArray(best?.Words) ? best.Words : [];
+  const heardText = payload?.DisplayText || result.text || "";
+  state.currentFinal = heardText;
+  els.liveTranscript.textContent = heardText || "No speech detected";
+
+  if (!apiWords.length) {
+    updateCurrentScores(heardText, true);
+    completeCurrentSentence();
+    return;
+  }
+
+  const sentenceIndex = state.currentIndex;
+  const expectedWords = getExpectedWords(sentenceIndex);
+  const normalizedApiWords = apiWords.map((word) => normalizeWord(word.Word));
+  const assignments = alignWords(expectedWords, normalizedApiWords);
+  const nextScores = [];
+
+  expectedWords.forEach((expected, index) => {
+    const apiIndex = assignments[index]?.heardIndex;
+    const apiWord = Number.isInteger(apiIndex) ? apiWords[apiIndex] : null;
+    const assessment = apiWord?.PronunciationAssessment || {};
+    const errorType = String(assessment.ErrorType || "").toLowerCase();
+    const rawScore = Number(assessment.AccuracyScore);
+    const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : 18;
+    const ipa = extractApiIpa(apiWord);
+    const status = errorType === "omission" || score < 68 ? "wrong" : score >= 84 ? "correct" : "close";
+
+    nextScores[index] = {
+      word: expected.raw,
+      normalized: expected.normalized,
+      score: apiWord ? score : 18,
+      status: apiWord ? status : "wrong",
+      ipa
+    };
+  });
+
+  state.scoresBySentence[sentenceIndex] = nextScores;
+  queueIpaLookups(sentenceIndex);
+  els.apiStatus.textContent = "Scored";
+  completeCurrentSentence();
+}
+
+function extractApiIpa(apiWord) {
+  const phonemes = apiWord?.Phonemes;
+  if (!Array.isArray(phonemes) || !phonemes.length) return "";
+  const symbols = phonemes.map((phoneme) => phoneme.Phoneme).filter(Boolean);
+  return symbols.length ? "/" + symbols.join(" ") + "/" : "";
 }
 
 function stopRecognition(recognition) {
@@ -488,6 +661,11 @@ function finalizeCurrentSentence(manual) {
   if (!heard && !manual) return;
 
   updateCurrentScores(heard, true);
+  completeCurrentSentence();
+}
+
+
+function completeCurrentSentence() {
   const average = getSentenceAverage(state.currentIndex);
   const allGood = average >= 84 && getWrongCount(state.currentIndex) === 0;
   state.completedCount = Math.max(state.completedCount, state.currentIndex + 1);
@@ -615,7 +793,7 @@ function alignWords(expectedWords, heardWords) {
     }
   }
 
-  const assignments = expectedWords.map(() => ({ score: null, similarity: 0 }));
+  const assignments = expectedWords.map(() => ({ score: null, similarity: 0, heardIndex: null }));
   let i = expectedWords.length;
   let j = heardWords.length;
 
@@ -625,12 +803,13 @@ function alignWords(expectedWords, heardWords) {
       const similarity = wordSimilarity(expectedWords[i - 1].normalized, heardWords[j - 1]);
       assignments[i - 1] = {
         score: similarityToScore(similarity),
-        similarity
+        similarity,
+        heardIndex: j - 1
       };
       i -= 1;
       j -= 1;
     } else if (action === "delete") {
-      assignments[i - 1] = { score: null, similarity: 0 };
+      assignments[i - 1] = { score: null, similarity: 0, heardIndex: null };
       i -= 1;
     } else {
       j -= 1;

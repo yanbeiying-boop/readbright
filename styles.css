@@ -640,6 +640,72 @@ button svg,
   }
 }
 
+
+.mode-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.panel-heading.compact {
+  min-height: 30px;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem;
+  padding: 0.28rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #edf3f8;
+}
+
+.segment {
+  height: 34px;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.segment.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--teal), var(--blue));
+  box-shadow: 0 6px 14px rgba(0, 123, 191, 0.16);
+}
+
+.api-panel {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.8rem;
+}
+
+.api-panel label {
+  display: grid;
+  gap: 0.32rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.api-panel input {
+  width: 100%;
+  height: 40px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  outline: none;
+}
+
+.api-panel input:focus {
+  border-color: rgba(0, 167, 165, 0.7);
+  box-shadow: 0 0 0 4px rgba(0, 167, 165, 0.15);
+}
+
 @media (max-width: 1120px) {
   .workspace {
     grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
