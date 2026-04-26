@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ReadBright</title>
+    <meta name="theme-color" content="#00a7a5" />
+    <meta
+      name="description"
+      content="A student-facing English reading practice web app with live sentence feedback."
+    />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true"></div>
+    <main class="app-shell">
+      <section class="name-gate" id="nameGate">
+        <div class="name-panel">
+          <p class="brand">ReadBright</p>
+          <h1>Hi, what's your name?</h1>
+          <div class="name-actions">
+            <button class="primary-button" id="listenNameButton" type="button">
+              <i data-lucide="mic"></i>
+              <span>Answer</span>
+            </button>
+            <div class="typed-name">
+              <input id="nameInput" type="text" autocomplete="given-name" placeholder="My name is..." />
+              <button class="icon-button" id="saveNameButton" type="button" title="Save name" aria-label="Save name">
+                <i data-lucide="check"></i>
+              </button>
+            </div>
+          </div>
+          <p class="gate-status" id="nameStatus">Ready</p>
+        </div>
+      </section>
+
+      <section class="practice-app is-hidden" id="practiceApp" aria-label="Reading practice">
+        <header class="topbar">
+          <div>
+            <p class="brand">ReadBright</p>
+            <h2 id="studentGreeting">Welcome</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost-button" id="resetNameButton" type="button">
+              <i data-lucide="user-round"></i>
+              <span>Name</span>
+            </button>
+            <button class="ghost-button" id="finishButton" type="button">
+              <i data-lucide="party-popper"></i>
+              <span>Finish</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="workspace">
+          <aside class="source-panel">
+            <div class="panel-heading">
+              <h3>Text</h3>
+              <label class="file-button" title="Upload PDF, Word, or text file">
+                <i data-lucide="upload"></i>
+                <span>Upload</span>
+                <input id="fileInput" type="file" accept=".pdf,.doc,.docx,.txt,.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
+              </label>
+            </div>
+            <textarea id="sourceText" spellcheck="false">The sun is bright today. I can read this sentence clearly. Practice makes every sound stronger.</textarea>
+            <div class="source-actions">
+              <button class="secondary-button" id="loadTextButton" type="button">
+                <i data-lucide="file-text"></i>
+                <span>Load</span>
+              </button>
+              <button class="secondary-button" id="sampleButton" type="button">
+                <i data-lucide="sparkles"></i>
+                <span>Sample</span>
+              </button>
+            </div>
+            <p class="panel-status" id="fileStatus">Ready</p>
+          </aside>
+
+          <section class="reading-stage">
+            <div class="stage-toolbar">
+              <div class="sentence-counter" id="sentenceCounter">1 / 3</div>
+              <div class="listen-controls">
+                <button class="primary-button" id="startReadingButton" type="button">
+                  <i data-lucide="mic"></i>
+                  <span>Start</span>
+                </button>
+                <button class="danger-button" id="stopReadingButton" type="button" disabled>
+                  <i data-lucide="square"></i>
+                  <span>Stop</span>
+                </button>
+                <button class="icon-button" id="nextSentenceButton" type="button" title="Next sentence" aria-label="Next sentence">
+                  <i data-lucide="chevron-right"></i>
+                </button>
+              </div>
+            </div>
+
+            <article class="reader-paper" id="readerPaper" aria-live="polite"></article>
+
+            <div class="live-strip">
+              <div>
+                <span class="mini-label">Heard</span>
+                <p id="liveTranscript">Waiting</p>
+              </div>
+              <div class="streak-pill" id="streakPill">
+                <i data-lucide="rainbow"></i>
+                <span>0</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="feedback-panel">
+            <div class="panel-heading">
+              <h3>Scores</h3>
+              <button class="icon-button" id="replaySentenceButton" type="button" title="Read sentence aloud" aria-label="Read sentence aloud">
+                <i data-lucide="volume-2"></i>
+              </button>
+            </div>
+            <div class="score-ring" id="scoreRing">
+              <span id="overallScore">--</span>
+            </div>
+            <div class="word-list" id="wordList"></div>
+          </aside>
+        </section>
+      </section>
+
+      <section class="finish-overlay is-hidden" id="finishOverlay" aria-live="assertive">
+        <div class="finish-panel">
+          <p class="brand">ReadBright</p>
+          <h2 id="finishMessage">Well done!</h2>
+          <p id="finishStats">Great reading.</p>
+          <button class="primary-button" id="againButton" type="button">
+            <i data-lucide="rotate-ccw"></i>
+            <span>Again</span>
+          </button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

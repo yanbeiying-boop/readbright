@@ -1,0 +1,17 @@
+{
+  "name": "ReadBright",
+  "short_name": "ReadBright",
+  "description": "Student English reading practice with live feedback.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f8fb",
+  "theme_color": "#00a7a5",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
