@@ -139,6 +139,7 @@ function bindElements() {
     "finishOverlay",
     "finishMessage",
     "finishStats",
+    "finishReport",
     "againButton"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
@@ -170,6 +171,7 @@ function bindEvents() {
   els.nextSentenceButton.addEventListener("click", () => finalizeCurrentSentence(true));
   els.replaySentenceButton.addEventListener("click", speakCurrentSentence);
   els.finishButton.addEventListener("click", finishPractice);
+  els.finishReport.addEventListener("click", handleFinishReportClick);
   els.againButton.addEventListener("click", restartPractice);
 }
 
@@ -1076,6 +1078,235 @@ function speak(text, afterEnd) {
   window.speechSynthesis.speak(utterance);
 }
 
+function handleFinishReportClick(event) {
+  const button = event.target.closest(".report-play");
+  if (!button) return;
+  speakWord(button.dataset.word || "");
+}
+
+function renderFinishReport(average) {
+  const report = buildPronunciationReport();
+  const container = document.createElement("div");
+
+  const summary = document.createElement("div");
+  summary.className = "report-summary";
+
+  const summaryTitle = document.createElement("strong");
+  summaryTitle.textContent = report.items.length ? "Pronunciation focus" : "Pronunciation report";
+
+  const summaryText = document.createElement("span");
+  summaryText.textContent = report.summary;
+
+  summary.append(summaryTitle, summaryText);
+  container.append(summary);
+
+  if (!report.items.length) {
+    const empty = document.createElement("p");
+    empty.className = "report-empty";
+    empty.textContent =
+      average >= 88
+        ? "No major sound pattern stood out. Keep reading slowly and clearly."
+        : "Read a few more sentences to get a richer sound report.";
+    container.append(empty);
+    els.finishReport.replaceChildren(container);
+    return;
+  }
+
+  const table = document.createElement("div");
+  table.className = "report-table";
+  table.setAttribute("role", "table");
+  table.setAttribute("aria-label", "Pronunciation report");
+
+  ["Word", "Score", "Focus", "Sound / IPA", "Tip"].forEach((heading) => {
+    const cell = document.createElement("div");
+    cell.className = "report-th";
+    cell.setAttribute("role", "columnheader");
+    cell.textContent = heading;
+    table.append(cell);
+  });
+
+  report.items.forEach((item) => {
+    const wordCell = document.createElement("div");
+    wordCell.className = "report-word";
+    wordCell.setAttribute("role", "cell");
+
+    const wordText = document.createElement("strong");
+    wordText.textContent = item.word;
+
+    const playButton = document.createElement("button");
+    playButton.className = "report-play";
+    playButton.type = "button";
+    playButton.dataset.word = item.word;
+    playButton.title = `Play ${item.word}`;
+    playButton.setAttribute("aria-label", `Play ${item.word}`);
+    playButton.innerHTML = '<i data-lucide="volume-2"></i>';
+
+    wordCell.append(wordText, playButton);
+    table.append(wordCell);
+
+    const scoreCell = document.createElement("div");
+    scoreCell.className = "report-score";
+    scoreCell.setAttribute("role", "cell");
+    scoreCell.textContent = String(item.score);
+    scoreCell.style.color = scoreColor(item.score);
+    table.append(scoreCell);
+
+    const focusCell = document.createElement("div");
+    focusCell.className = "report-focus";
+    focusCell.setAttribute("role", "cell");
+    focusCell.textContent = item.focus;
+    table.append(focusCell);
+
+    const ipaCell = document.createElement("div");
+    ipaCell.className = "report-ipa";
+    ipaCell.setAttribute("role", "cell");
+    ipaCell.textContent = formatReportSound(item);
+    table.append(ipaCell);
+
+    const tipCell = document.createElement("div");
+    tipCell.className = "report-tip";
+    tipCell.setAttribute("role", "cell");
+    tipCell.textContent = item.tip;
+    table.append(tipCell);
+  });
+
+  container.append(table);
+  els.finishReport.replaceChildren(container);
+  hydrateIcons();
+}
+
+function buildPronunciationReport() {
+  const byWord = new Map();
+
+  state.scoresBySentence.forEach((sentenceScores) => {
+    sentenceScores.filter(Boolean).forEach((item) => {
+      if (item.score >= 84 && item.status === "correct") return;
+
+      const key = item.normalized || normalizeWord(item.word);
+      if (!key) return;
+
+      const ipa = item.ipa && item.ipa !== "..." ? item.ipa : localIpa[key] || "";
+      const current = byWord.get(key);
+      const next = {
+        word: item.word,
+        normalized: key,
+        score: item.score,
+        status: item.status,
+        ipa
+      };
+
+      if (!current || item.score < current.score) byWord.set(key, next);
+    });
+  });
+
+  const items = Array.from(byWord.values())
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 8)
+    .map((item) => ({
+      ...item,
+      ...analyzePronunciationFocus(item)
+    }));
+
+  const focusCounts = items.reduce(
+    (counts, item) => {
+      if (item.focus.includes("Vowel")) counts.vowels += 1;
+      if (item.focus.includes("Consonant")) counts.consonants += 1;
+      return counts;
+    },
+    { vowels: 0, consonants: 0 }
+  );
+
+  let summary = "No repeated weak sound pattern yet.";
+  if (items.length) {
+    const mainFocus =
+      focusCounts.vowels > focusCounts.consonants
+        ? "vowel sounds"
+        : focusCounts.consonants > focusCounts.vowels
+          ? "consonant sounds"
+          : "both vowel and consonant sounds";
+    summary = `${items.length} word${items.length === 1 ? "" : "s"} to review, with most attention on ${mainFocus}.`;
+  }
+
+  return { items, summary };
+}
+
+function formatReportSound(item) {
+  if (item.ipa && item.sound && !item.ipa.includes(item.sound)) {
+    return `${item.sound} · ${item.ipa}`;
+  }
+  return item.ipa || item.sound || "Listen";
+}
+
+function analyzePronunciationFocus(item) {
+  const word = item.normalized || normalizeWord(item.word);
+  const ipa = item.ipa && item.ipa !== "..." ? item.ipa : localIpa[word] || "";
+  const compactIpa = ipa.replace(/[\/\s]/g, "");
+  const cues = [];
+
+  const addCue = (focus, sound, tip, weight = 1) => {
+    cues.push({ focus, sound, tip, weight });
+  };
+
+  if (/th/.test(word) || /[θð]/.test(compactIpa)) {
+    addCue("Consonant", "/th/", "Put the tongue tip lightly between the teeth, then let air pass.", 3);
+  }
+  if (/sh/.test(word) || /ʃ/.test(compactIpa)) {
+    addCue("Consonant", "/ʃ/", "Round the lips a little and push air through the middle of the tongue.", 2);
+  }
+  if (/ch/.test(word) || /tʃ/.test(compactIpa)) {
+    addCue("Consonant", "/tʃ/", "Start with a quick /t/ stop, then release into /sh/.", 2);
+  }
+  if (/v/.test(word) || /v/.test(compactIpa)) {
+    addCue("Consonant", "/v/", "Touch top teeth to lower lip and keep the sound vibrating.", 2);
+  }
+  if (/[rl]/.test(word) || /[rl]/.test(compactIpa)) {
+    addCue("Consonant", "/r/ or /l/", "For /l/, touch behind the teeth; for /r/, pull the tongue back.", 2);
+  }
+  if (/ng$/.test(word) || /ŋ/.test(compactIpa)) {
+    addCue("Consonant", "/ŋ/", "Lift the back of the tongue like 'sing' and do not add a hard /g/.", 2);
+  }
+  if (/(str|spr|scr|thr|cl|pl|pr|tr|dr|st|sk|sp)/.test(word)) {
+    addCue("Consonant", "cluster", "Break the consonant cluster slowly, then blend it without adding a vowel.", 2);
+  }
+  if (/[ptkbdgfsz]$/.test(word)) {
+    addCue("Consonant", "final sound", "Finish the last consonant clearly; do not let the word fade away.", 1);
+  }
+
+  if (/æ/.test(compactIpa) || /a/.test(word) && !/(ai|ay|ar)/.test(word)) {
+    addCue("Vowel", "/æ/", "Open the mouth wider, like the vowel in 'cat'.", 2);
+  }
+  if (/iː|ɪ/.test(compactIpa) || /(ee|ea|i)/.test(word)) {
+    addCue("Vowel", "/i/ sound", "Keep /i:/ long and smiling; keep /ɪ/ shorter and more relaxed.", 2);
+  }
+  if (/ʌ|ɑː|ɔː|ʊ|uː|ə/.test(compactIpa)) {
+    addCue("Vowel", "core vowel", "Hold the vowel shape steady before moving to the next sound.", 2);
+  }
+  if (/aɪ|eɪ|ɔɪ|aʊ|oʊ/.test(compactIpa) || /(igh|ay|ow|oy|ou)/.test(word)) {
+    addCue("Vowel", "diphthong", "Glide smoothly from the first vowel position to the second.", 2);
+  }
+  if (/ɚ|ər|r\//.test(ipa) || /(er|or|ar|ir|ur)$/.test(word)) {
+    addCue("Vowel + consonant", "r-colored vowel", "Hold the vowel, then curl gently into /r/ without adding an extra syllable.", 3);
+  }
+
+  if (!cues.length) {
+    return {
+      focus: "Vowel + consonant",
+      sound: ipa || "word shape",
+      tip: "Say the word slowly, listen once, then repeat with a clear first vowel and final sound."
+    };
+  }
+
+  const hasVowel = cues.some((cue) => cue.focus.includes("Vowel"));
+  const hasConsonant = cues.some((cue) => cue.focus.includes("Consonant"));
+  const strongest = cues.sort((a, b) => b.weight - a.weight)[0];
+
+  return {
+    focus: hasVowel && hasConsonant ? "Vowel + consonant" : strongest.focus,
+    sound: strongest.sound,
+    tip: strongest.tip
+  };
+}
+
 function finishPractice() {
   stopReading();
   const allScores = state.scoresBySentence.flat().filter(Boolean);
@@ -1087,6 +1318,7 @@ function finishPractice() {
 
   els.finishMessage.textContent = message;
   els.finishStats.textContent = average ? `Average score ${average}` : "Great reading.";
+  renderFinishReport(average);
   els.finishOverlay.classList.remove("is-hidden");
   speak(message);
 }

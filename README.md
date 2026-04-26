@@ -13,6 +13,7 @@ ReadBright is a student-facing English reading practice web app. A student opens
 - Tap the speaker beside a misread word to hear the correct pronunciation.
 - Trigger a rainbow streak when consecutive sentences are read accurately.
 - Hear an ending encouragement such as "Alex, well done!"
+- Review a final pronunciation report with weak sounds, vowel/consonant focus, and short practice tips.
 
 ## How To Share It With Students
 
