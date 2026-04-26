@@ -9,11 +9,11 @@ ReadBright is a student-facing English reading practice web app. A student opens
 - Read each sentence aloud with microphone feedback.
 - Choose Free mode or API mode.
 - See word scores appear with a sparkle effect.
-- See misread words highlighted with IPA when available.
+- See misread words highlighted with IPA.
 - Tap the speaker beside a misread word to hear the correct pronunciation.
 - Trigger a rainbow streak when consecutive sentences are read accurately.
 - Hear an ending encouragement such as "Alex, well done!"
-- Review a final pronunciation report with weak sounds, vowel/consonant focus, and short practice tips.
+- Review a final pronunciation report with weak sounds, vowel/consonant focus, and short Chinese practice tips.
 
 ## How To Share It With Students
 
@@ -67,7 +67,9 @@ Free mode speech recognition is provided by the student's browser. Depending on 
 
 API mode sends the student's microphone audio to Azure Speech using the key and region entered on that device. The app stores the Azure region locally for convenience, but it does not save the API key.
 
-IPA is included locally for common words in this prototype and API mode can return phoneme data from Azure. For full vocabulary coverage in a production student app, connect a pronunciation dictionary or speech assessment service through your own backend.
+When a word is missed, the app may send that single word to a public dictionary service to retrieve IPA. Full uploaded documents are not sent to that dictionary service.
+
+IPA is included locally for common words in this prototype, API mode can return phoneme data from Azure, and missed words can query a public dictionary service for IPA. If the dictionary is unavailable, the app falls back to an on-device phonics estimate so missed words still show a pronunciation guide. For production classroom use, a teacher-owned backend pronunciation dictionary is safer and more consistent.
 
 ## Production Upgrade Path
 

@@ -556,6 +556,12 @@ function applyApiAssessmentResult(result) {
 
   if (!apiWords.length) {
     updateCurrentScores(heardText, true);
+    if (!isCurrentSentenceComplete(heardText)) {
+      els.apiStatus.textContent = "Sentence not finished";
+      els.liveTranscript.textContent = "Keep reading this sentence.";
+      renderAll();
+      return;
+    }
     completeCurrentSentence();
     return;
   }
@@ -588,6 +594,12 @@ function applyApiAssessmentResult(result) {
   state.scoresBySentence[sentenceIndex] = nextScores;
   queueIpaLookups(sentenceIndex);
   els.apiStatus.textContent = "Scored";
+  if (normalizedApiWords.filter(Boolean).length < expectedWords.length) {
+    els.apiStatus.textContent = "Sentence not finished";
+    els.liveTranscript.textContent = "Keep reading this sentence.";
+    renderAll();
+    return;
+  }
   completeCurrentSentence();
 }
 
@@ -638,13 +650,14 @@ function handleReadingResult(event) {
   updateCurrentScores(combined, false);
 
   if (combined) {
-    const heardCount = normalizeWords(combined).length;
-    const expectedCount = getExpectedWords(state.currentIndex).length;
-    const average = getSentenceAverage(state.currentIndex);
-    const delay = heardCount >= expectedCount && average >= 68 ? 700 : 1650;
-    scheduleFinalize(delay);
+    const likelyComplete = isCurrentSentenceComplete(combined);
+    if (likelyComplete) {
+      scheduleFinalize(900);
+    } else {
+      clearTimeout(state.finalizeTimer);
+    }
   } else if (sawFinal) {
-    scheduleFinalize(1650);
+    clearTimeout(state.finalizeTimer);
   }
 }
 
@@ -657,11 +670,21 @@ function scheduleFinalize(delay) {
   state.finalizeTimer = setTimeout(() => finalizeCurrentSentence(false), delay);
 }
 
+function isCurrentSentenceComplete(heard) {
+  const expectedCount = getExpectedWords(state.currentIndex).length;
+  if (!expectedCount) return true;
+  return normalizeWords(heard).length >= expectedCount;
+}
+
 function finalizeCurrentSentence(manual) {
   clearTimeout(state.finalizeTimer);
   const heard = getCurrentHeardText();
 
   if (!heard && !manual) return;
+  if (!heard || !isCurrentSentenceComplete(heard)) {
+    els.liveTranscript.textContent = "Finish this sentence first.";
+    return;
+  }
 
   updateCurrentScores(heard, true);
   completeCurrentSentence();
@@ -891,8 +914,64 @@ async function getIpa(normalizedWord) {
     return localIpa[normalizedWord];
   }
 
-  ipaCache.set(normalizedWord, "");
-  return "";
+  try {
+    const response = await fetch(
+      `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(normalizedWord)}`
+    );
+    if (response.ok) {
+      const entries = await response.json();
+      const ipa = entries
+        .flatMap((entry) => [entry.phonetic, ...(entry.phonetics || []).map((phonetic) => phonetic.text)])
+        .find((value) => typeof value === "string" && /^\/.+\/$/.test(value.trim()));
+      if (ipa) {
+        ipaCache.set(normalizedWord, ipa.trim());
+        return ipa.trim();
+      }
+    }
+  } catch {
+    /* Fall back to an on-device phonics estimate if the dictionary is unavailable. */
+  }
+
+  const fallback = estimateIpaFromSpelling(normalizedWord);
+  ipaCache.set(normalizedWord, fallback);
+  return fallback;
+}
+
+function estimateIpaFromSpelling(word) {
+  const clean = normalizeWord(word);
+  if (!clean) return "";
+
+  let ipa = clean;
+  ipa = ipa
+    .replace(/tion$/g, "ʃən")
+    .replace(/sion$/g, "ʒən")
+    .replace(/ough/g, "ɔː")
+    .replace(/igh/g, "aɪ")
+    .replace(/eigh/g, "eɪ")
+    .replace(/ch/g, "tʃ")
+    .replace(/sh/g, "ʃ")
+    .replace(/th/g, "θ")
+    .replace(/ph/g, "f")
+    .replace(/ng/g, "ŋ")
+    .replace(/qu/g, "kw")
+    .replace(/ee|ea/g, "iː")
+    .replace(/oo/g, "uː")
+    .replace(/ai|ay/g, "eɪ")
+    .replace(/oi|oy/g, "ɔɪ")
+    .replace(/ou|ow/g, "aʊ")
+    .replace(/ar/g, "ɑːr")
+    .replace(/er|ir|ur/g, "ɝ")
+    .replace(/or/g, "ɔːr")
+    .replace(/a/g, "æ")
+    .replace(/e/g, "e")
+    .replace(/i/g, "ɪ")
+    .replace(/o/g, "ɑː")
+    .replace(/u/g, "ʌ")
+    .replace(/c/g, "k")
+    .replace(/x/g, "ks")
+    .replace(/y$/g, "i");
+
+  return `/${ipa}/`;
 }
 
 function renderAll() {
@@ -954,7 +1033,7 @@ function createWordCell(word, sentenceIndex, wordIndex) {
 
   const ipa = document.createElement("span");
   ipa.className = "ipa";
-  ipa.textContent = score?.status === "wrong" ? score.ipa : "";
+  ipa.textContent = score?.status === "wrong" ? getDisplayIpa(score, word) : "";
 
   const helpRow = document.createElement("span");
   helpRow.className = "pron-row";
@@ -978,6 +1057,12 @@ function handleReaderPaperClick(event) {
   const button = event.target.closest(".pron-button");
   if (!button) return;
   speakWord(button.dataset.word || "");
+}
+
+function getDisplayIpa(score, word) {
+  if (score?.ipa && score.ipa !== "...") return score.ipa;
+  const normalized = score?.normalized || normalizeWord(word);
+  return localIpa[normalized] || estimateIpaFromSpelling(normalized);
 }
 
 function renderFeedback() {
@@ -1092,7 +1177,7 @@ function renderFinishReport(average) {
   summary.className = "report-summary";
 
   const summaryTitle = document.createElement("strong");
-  summaryTitle.textContent = report.items.length ? "Pronunciation focus" : "Pronunciation report";
+  summaryTitle.textContent = report.items.length ? "发音重点" : "发音报告";
 
   const summaryText = document.createElement("span");
   summaryText.textContent = report.summary;
@@ -1105,8 +1190,8 @@ function renderFinishReport(average) {
     empty.className = "report-empty";
     empty.textContent =
       average >= 88
-        ? "No major sound pattern stood out. Keep reading slowly and clearly."
-        : "Read a few more sentences to get a richer sound report.";
+        ? "这次没有明显薄弱音。继续保持慢速、清楚、完整地朗读。"
+        : "再多读几句，系统就能生成更丰富的发音报告。";
     container.append(empty);
     els.finishReport.replaceChildren(container);
     return;
@@ -1115,9 +1200,9 @@ function renderFinishReport(average) {
   const table = document.createElement("div");
   table.className = "report-table";
   table.setAttribute("role", "table");
-  table.setAttribute("aria-label", "Pronunciation report");
+  table.setAttribute("aria-label", "发音报告");
 
-  ["Word", "Score", "Focus", "Sound / IPA", "Tip"].forEach((heading) => {
+  ["单词", "分数", "类型", "音标 / 目标音", "练习提示"].forEach((heading) => {
     const cell = document.createElement("div");
     cell.className = "report-th";
     cell.setAttribute("role", "columnheader");
@@ -1185,7 +1270,7 @@ function buildPronunciationReport() {
       const key = item.normalized || normalizeWord(item.word);
       if (!key) return;
 
-      const ipa = item.ipa && item.ipa !== "..." ? item.ipa : localIpa[key] || "";
+      const ipa = item.ipa && item.ipa !== "..." ? item.ipa : localIpa[key] || estimateIpaFromSpelling(key);
       const current = byWord.get(key);
       const next = {
         word: item.word,
@@ -1209,22 +1294,22 @@ function buildPronunciationReport() {
 
   const focusCounts = items.reduce(
     (counts, item) => {
-      if (item.focus.includes("Vowel")) counts.vowels += 1;
-      if (item.focus.includes("Consonant")) counts.consonants += 1;
+      if (item.focus.includes("元音")) counts.vowels += 1;
+      if (item.focus.includes("辅音")) counts.consonants += 1;
       return counts;
     },
     { vowels: 0, consonants: 0 }
   );
 
-  let summary = "No repeated weak sound pattern yet.";
+  let summary = "暂时没有发现重复的薄弱音。";
   if (items.length) {
     const mainFocus =
       focusCounts.vowels > focusCounts.consonants
-        ? "vowel sounds"
+        ? "元音"
         : focusCounts.consonants > focusCounts.vowels
-          ? "consonant sounds"
-          : "both vowel and consonant sounds";
-    summary = `${items.length} word${items.length === 1 ? "" : "s"} to review, with most attention on ${mainFocus}.`;
+          ? "辅音"
+          : "元音和辅音";
+    summary = `这次有 ${items.length} 个单词建议复习，重点注意 ${mainFocus} 的清晰度。`;
   }
 
   return { items, summary };
@@ -1234,12 +1319,12 @@ function formatReportSound(item) {
   if (item.ipa && item.sound && !item.ipa.includes(item.sound)) {
     return `${item.sound} · ${item.ipa}`;
   }
-  return item.ipa || item.sound || "Listen";
+  return item.ipa || item.sound || "听一遍";
 }
 
 function analyzePronunciationFocus(item) {
   const word = item.normalized || normalizeWord(item.word);
-  const ipa = item.ipa && item.ipa !== "..." ? item.ipa : localIpa[word] || "";
+  const ipa = item.ipa && item.ipa !== "..." ? item.ipa : localIpa[word] || estimateIpaFromSpelling(word);
   const compactIpa = ipa.replace(/[\/\s]/g, "");
   const cues = [];
 
@@ -1248,60 +1333,60 @@ function analyzePronunciationFocus(item) {
   };
 
   if (/th/.test(word) || /[θð]/.test(compactIpa)) {
-    addCue("Consonant", "/th/", "Put the tongue tip lightly between the teeth, then let air pass.", 3);
+    addCue("辅音", "/θ/ /ð/", "舌尖轻轻放在上下齿之间，让气流从舌尖通过，不要读成 /s/ 或 /d/。", 3);
   }
   if (/sh/.test(word) || /ʃ/.test(compactIpa)) {
-    addCue("Consonant", "/ʃ/", "Round the lips a little and push air through the middle of the tongue.", 2);
+    addCue("辅音", "/ʃ/", "嘴唇稍微收圆，舌面中部送气，声音像中文“嘘”，但不要加出多余元音。", 2);
   }
   if (/ch/.test(word) || /tʃ/.test(compactIpa)) {
-    addCue("Consonant", "/tʃ/", "Start with a quick /t/ stop, then release into /sh/.", 2);
+    addCue("辅音", "/tʃ/", "先短促顶住 /t/，再马上释放成 /ʃ/，练习时可以慢读再连起来。", 2);
   }
   if (/v/.test(word) || /v/.test(compactIpa)) {
-    addCue("Consonant", "/v/", "Touch top teeth to lower lip and keep the sound vibrating.", 2);
+    addCue("辅音", "/v/", "上齿轻触下唇并保持震动，不要读成 /w/ 或 /f/。", 2);
   }
   if (/[rl]/.test(word) || /[rl]/.test(compactIpa)) {
-    addCue("Consonant", "/r/ or /l/", "For /l/, touch behind the teeth; for /r/, pull the tongue back.", 2);
+    addCue("辅音", "/r/ /l/", "/l/ 舌尖碰上齿龈；/r/ 舌头后缩不碰上颚，两个音要分开练。", 2);
   }
   if (/ng$/.test(word) || /ŋ/.test(compactIpa)) {
-    addCue("Consonant", "/ŋ/", "Lift the back of the tongue like 'sing' and do not add a hard /g/.", 2);
+    addCue("辅音", "/ŋ/", "舌根抬起发鼻音，像 sing 的结尾，不要在后面再加一个很重的 /g/。", 2);
   }
   if (/(str|spr|scr|thr|cl|pl|pr|tr|dr|st|sk|sp)/.test(word)) {
-    addCue("Consonant", "cluster", "Break the consonant cluster slowly, then blend it without adding a vowel.", 2);
+    addCue("辅音", "辅音连缀", "把几个辅音先拆开慢读，再连起来，中间不要偷偷加“呃”的声音。", 2);
   }
   if (/[ptkbdgfsz]$/.test(word)) {
-    addCue("Consonant", "final sound", "Finish the last consonant clearly; do not let the word fade away.", 1);
+    addCue("辅音", "词尾辅音", "最后一个辅音要收清楚，尤其句末不要把词尾吞掉。", 1);
   }
 
-  if (/æ/.test(compactIpa) || /a/.test(word) && !/(ai|ay|ar)/.test(word)) {
-    addCue("Vowel", "/æ/", "Open the mouth wider, like the vowel in 'cat'.", 2);
+  if (/æ/.test(compactIpa) || (/a/.test(word) && !/(ai|ay|ar)/.test(word))) {
+    addCue("元音", "/æ/", "嘴巴横向和纵向都打开一些，像 cat 里的元音，不要读得太像 /e/。", 2);
   }
   if (/iː|ɪ/.test(compactIpa) || /(ee|ea|i)/.test(word)) {
-    addCue("Vowel", "/i/ sound", "Keep /i:/ long and smiling; keep /ɪ/ shorter and more relaxed.", 2);
+    addCue("元音", "/iː/ /ɪ/", "/iː/ 要更长、更紧、嘴角微笑；/ɪ/ 更短、更放松。", 2);
   }
   if (/ʌ|ɑː|ɔː|ʊ|uː|ə/.test(compactIpa)) {
-    addCue("Vowel", "core vowel", "Hold the vowel shape steady before moving to the next sound.", 2);
+    addCue("元音", "核心元音", "先把元音口型稳定住，再接后面的辅音，不要太快滑过去。", 2);
   }
   if (/aɪ|eɪ|ɔɪ|aʊ|oʊ/.test(compactIpa) || /(igh|ay|ow|oy|ou)/.test(word)) {
-    addCue("Vowel", "diphthong", "Glide smoothly from the first vowel position to the second.", 2);
+    addCue("元音", "双元音", "双元音要有滑动：从第一个口型自然滑到第二个口型，不要只发成一个短音。", 2);
   }
   if (/ɚ|ər|r\//.test(ipa) || /(er|or|ar|ir|ur)$/.test(word)) {
-    addCue("Vowel + consonant", "r-colored vowel", "Hold the vowel, then curl gently into /r/ without adding an extra syllable.", 3);
+    addCue("元音 + 辅音", "卷舌元音", "先保留元音，再轻轻卷到 /r/，不要多加一个音节。", 3);
   }
 
   if (!cues.length) {
     return {
-      focus: "Vowel + consonant",
-      sound: ipa || "word shape",
-      tip: "Say the word slowly, listen once, then repeat with a clear first vowel and final sound."
+      focus: "元音 + 辅音",
+      sound: ipa || "单词整体",
+      tip: "先点小喇叭听一遍，再慢速跟读：第一遍抓元音，第二遍收清词尾。"
     };
   }
 
-  const hasVowel = cues.some((cue) => cue.focus.includes("Vowel"));
-  const hasConsonant = cues.some((cue) => cue.focus.includes("Consonant"));
+  const hasVowel = cues.some((cue) => cue.focus.includes("元音"));
+  const hasConsonant = cues.some((cue) => cue.focus.includes("辅音"));
   const strongest = cues.sort((a, b) => b.weight - a.weight)[0];
 
   return {
-    focus: hasVowel && hasConsonant ? "Vowel + consonant" : strongest.focus,
+    focus: hasVowel && hasConsonant ? "元音 + 辅音" : strongest.focus,
     sound: strongest.sound,
     tip: strongest.tip
   };
