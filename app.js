@@ -158,6 +158,7 @@ function bindEvents() {
     loadText();
   });
   els.fileInput.addEventListener("change", handleFileUpload);
+  els.readerPaper.addEventListener("click", handleReaderPaperClick);
   els.modeFreeButton.addEventListener("click", () => setAssessmentMode("free"));
   els.modeApiButton.addEventListener("click", () => setAssessmentMode("api"));
   els.azureRegionInput.addEventListener("input", () => {
@@ -953,8 +954,28 @@ function createWordCell(word, sentenceIndex, wordIndex) {
   ipa.className = "ipa";
   ipa.textContent = score?.status === "wrong" ? score.ipa : "";
 
-  cell.append(scoreBadge, wordText, ipa);
+  const helpRow = document.createElement("span");
+  helpRow.className = "pron-row";
+  helpRow.append(ipa);
+
+  const playButton = document.createElement("button");
+  playButton.className = "pron-button";
+  playButton.type = "button";
+  playButton.title = `Play ${word}`;
+  playButton.setAttribute("aria-label", `Play ${word}`);
+  playButton.dataset.word = word;
+  playButton.innerHTML = '<i data-lucide="volume-2"></i>';
+  if (score?.status !== "wrong") playButton.hidden = true;
+  helpRow.append(playButton);
+
+  cell.append(scoreBadge, wordText, helpRow);
   return cell;
+}
+
+function handleReaderPaperClick(event) {
+  const button = event.target.closest(".pron-button");
+  if (!button) return;
+  speakWord(button.dataset.word || "");
 }
 
 function renderFeedback() {
@@ -1022,6 +1043,18 @@ function triggerRainbow() {
 function speakCurrentSentence() {
   const sentence = state.sentences[state.currentIndex];
   if (sentence) speak(sentence);
+}
+
+function speakWord(word) {
+  const cleanWord = String(word || "").replace(/[^A-Za-z'-]/g, "").trim();
+  if (!cleanWord || !window.speechSynthesis) return;
+
+  const utterance = new SpeechSynthesisUtterance(cleanWord);
+  utterance.lang = "en-US";
+  utterance.rate = 0.74;
+  utterance.pitch = 1;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
 }
 
 function speak(text, afterEnd) {

@@ -10,6 +10,7 @@ ReadBright is a student-facing English reading practice web app. A student opens
 - Choose Free mode or API mode.
 - See word scores appear with a sparkle effect.
 - See misread words highlighted with IPA when available.
+- Tap the speaker beside a misread word to hear the correct pronunciation.
 - Trigger a rainbow streak when consecutive sentences are read accurately.
 - Hear an ending encouragement such as "Alex, well done!"
 
